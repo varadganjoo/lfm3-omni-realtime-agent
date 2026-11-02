@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect your local companion</title>
+<style>
+  :root { color-scheme: light dark; font: 17px/1.6 system-ui, sans-serif; }
+  body { max-width: 680px; margin: auto; padding: 40px 24px 64px; }
+  h1 { font-size: clamp(2rem, 5vw, 2.8rem); line-height: 1.15; letter-spacing: -.04em; }
+  h2 { font-size: 1.15rem; margin-top: 32px; }
+  a { color: light-dark(#385fc7, #96afff); text-underline-offset: .2em; }
+  li { margin: 12px 0; }
+  code { overflow-wrap: anywhere; font-size: .8rem; }
+  .open { display: inline-block; margin: 16px 0; padding: 12px 20px; border: 1px solid; border-radius: 8px; }
+</style>
+<main>
+<p>Local companion</p>
+<h1>Connect another device.</h1>
+<p>No access code. Your phone, tablet or computer can connect over your home Wi-Fi. First, trust its local certificate so the browser can use your microphone and camera.</p>
+<p><a href="/companion-ca.cer">Download the companion certificate</a></p>
+<p>Certificate name: <strong>Local Companion Home CA</strong><br>Compare this SHA-256 fingerprint with the one on your host computer before trusting it:</p>
+<code>{{FINGERPRINT}}</code>
+<h2>iPhone or iPad</h2>
+<ol>
+<li>Download the certificate in Safari. Open Settings → Profile Downloaded (or General → VPN &amp; Device Management), select the companion certificate and install it.</li>
+<li>Open Settings → General → About → Certificate Trust Settings. Enable full trust for <strong>Local Companion Home CA</strong>.</li>
+</ol>
+<h2>Android</h2>
+<p>Download the certificate, then search Settings for <strong>Install a certificate</strong>. Choose <strong>CA certificate</strong> and select the downloaded file. Menu names vary by manufacturer. Open the companion in Chrome after installing.</p>
+<h2>Windows</h2>
+<p>Open the downloaded certificate → Install Certificate → Current User → Place all certificates in the following store → <strong>Trusted Root Certification Authorities</strong>. Finish the installation and restart your browser.</p>
+<h2>Mac</h2>
+<p>Open the certificate in Keychain Access and add it to your login keychain. Open <strong>Local Companion Home CA</strong>, expand Trust and select Always Trust for SSL. Close the window and confirm the change.</p>
+<a class="open" href="{{ORIGIN}}/">Open your companion →</a>
+<p>Allow microphone and camera when you click <strong>Start live</strong>. Use headphones for your first conversation. Only one live conversation can run at a time.</p>
+<p>This setup page serves only these instructions and the public certificate. Your conversation uses the encrypted address above. Anyone on this home subnet can use the assistant and access its shared notes and memory.</p>
+<p><a href="https://support.apple.com/en-us/102390">Apple certificate help</a> · <a href="https://support.google.com/pixelphone/answer/2844832">Android certificate help</a></p>
+</main>
+</html>

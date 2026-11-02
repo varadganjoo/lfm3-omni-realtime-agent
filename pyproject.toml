@@ -1,0 +1,11 @@
+[project]
+name = "local-companion-live"
+version = "0.1.0"
+description = "Local Pipecat audio/video conversation with LFM3-Omni"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "av==17.1.0",
+    "fastapi==0.162.0",
+    "pipecat-ai[websocket]==1.15.0",
+    "uvicorn==0.54.0",
+]
