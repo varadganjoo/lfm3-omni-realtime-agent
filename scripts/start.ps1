@@ -36,7 +36,7 @@ $owned = @()
 try {
     if (Test-Ready 'http://127.0.0.1:8081/health') { throw 'Port 8081 is already in use. Stop that service before starting this test.' }
     if (Test-Ready 'http://127.0.0.1:8788/health') { throw 'Port 8788 is already in use.' }
-    $modelArgs = @('-m', 'models/LFM3-Omni-2B-Q4_K_M.gguf', '--mmproj', 'models/mmproj-LFM3-Omni-2B-Q8_0.gguf', '--host', '127.0.0.1', '--port', '8081', '--alias', 'local-omni', '-c', '8192', '-ngl', '99', '--parallel', '1', '--reasoning', 'off', '--temp', '0', '--jinja', '--video-fps', '2', '--api-key-file', ('"' + $keyPath + '"'))
+    $modelArgs = @('-m', 'models/LFM3-Omni-2B-Q4_K_M.gguf', '--mmproj', 'models/mmproj-LFM3-Omni-2B-Q8_0.gguf', '--host', '127.0.0.1', '--port', '8081', '--alias', 'local-omni', '-c', '16384', '-ngl', '99', '--parallel', '2', '--reasoning', 'off', '--temp', '0', '--jinja', '--video-fps', '2', '--api-key-file', ('"' + $keyPath + '"'))
     $modelProcess = Start-Process -FilePath $serverPath -ArgumentList $modelArgs -WorkingDirectory $rootPath -WindowStyle Hidden -RedirectStandardOutput (Join-Path $runtimePath 'model.stdout.log') -RedirectStandardError (Join-Path $runtimePath 'model.stderr.log') -PassThru
     $owned += @{ Id = $modelProcess.Id; StartedTicks = $modelProcess.StartTime.ToUniversalTime().Ticks }
     $deadline = (Get-Date).AddSeconds(90)

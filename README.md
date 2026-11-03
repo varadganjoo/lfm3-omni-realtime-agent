@@ -4,7 +4,7 @@
 
 # Local Omni Agent
 
-An experimental voice-and-vision agent built with **LFM3-Omni-2B, llama.cpp and Pipecat**. Talk to it, share your webcam, interrupt a reply, and ask it to save a note. Model inference runs on your own machine.
+An experimental voice-and-vision agent built with **LFM3-Omni-2B, llama.cpp and Pipecat**. One native realtime session handles voice and typed requests, streams spoken replies, and uses visual context from webcam clips or image attachments. Inference runs locally.
 
 This repository demonstrates a small working agent mechanism, not a production assistant or a benchmark. The supported launcher targets **Windows with an NVIDIA GPU**. Model weights and native binaries are downloaded separately and are not included here.
 
@@ -21,10 +21,10 @@ This repository demonstrates a small working agent mechanism, not a production a
 
 ## What you can try
 
-- **Live voice and video.** Stream microphone audio and webcam frames to a local Pipecat pipeline.
+- **Live voice and video.** Speak, see a local transcript, and ask about changes in the webcam view.
 - **Spoken interruption.** Speak over a reply to cancel inference and flush playback. Use **Stop agent** to end the call and release the devices.
 - **Small, useful actions.** Save Markdown notes and retain facts or preferences through two validated model tools.
-- **Typed conversation.** Send a message with or without a live call and hear the reply.
+- **Text and images.** During a call, type a question or attach a JPEG, PNG, or WebP. An attachment supplies the visual context for that turn in place of the webcam clip.
 - **Optional LAN testing.** Use another device on your trusted local network through HTTPS. No cloud tunnel is required.
 
 Try saying:
@@ -57,7 +57,7 @@ Open **[http://127.0.0.1:8787/](http://127.0.0.1:8787/)** using this exact addre
 
 1. Choose whether to use the camera, then select **Start live**.
 2. Allow microphone/camera access in the browser.
-3. Speak, wait for the reply, then interrupt it by speaking again or pressing **Interrupt**. **Escape** interrupts a live reply too.
+3. Speak or type a message. Use **Attach an image** for a still image. Interrupt a reply by speaking again, pressing **Interrupt**, or pressing **Escape**.
 4. Select **Stop agent** when finished. Notes and memory remain saved.
 
 Use headphones for the first test to reduce speaker echo triggering another turn. If one browser leaves a permission request pending or cannot load the local page, test another installed browser.
@@ -78,6 +78,12 @@ The launcher prints your own HTTPS address and a certificate-help address. Camer
 
 **LAN mode has no login.** Anyone on the configured subnet can use the instance and read or change its shared notes/memory. It is intended for a trusted home or lab network, not public internet hosting.
 
+## Native voice and vision
+
+Select **Start live** to speak or type to Local Companion. The app transcribes speech locally and uses the local LFM3 realtime session for replies. Enable **Use camera** to include a description of the recent clip.
+
+The adapter executes tool calls before requesting a spoken confirmation. If a reply arrives as text alone, the adapter can ask the same session to speak it in a second response. [Native session behavior and limits](docs/native-voice.md).
+
 ## What “real time” means
 
 Media flows continuously, but the model answers at turn boundaries:
@@ -86,15 +92,14 @@ Media flows continuously, but the model answers at turn boundaries:
 flowchart LR
   Browser[Browser: mic and camera] <-->|WebSocket / WSS| Node[Node: session and media gateway]
   Node <-->|Loopback media socket| Pipecat[Pipecat: VAD and interruption]
-  Pipecat -->|WAV + recent WebM clip| Agent[Node: agent and validated tools]
-  Agent <-->|Chat completions| Model[LFM3-Omni in llama.cpp]
-  Pipecat <-->|Streaming TTS| Model
+  Pipecat <-->|Native audio and local camera analysis| Model[LFM3-Omni in llama.cpp]
+  Pipecat -->|Validated tool requests| Agent[Node: tools]
   Agent --> Files[Local notes and memory]
 ```
 
-Pipecat receives 16 kHz PCM audio and reduced JPEG frames at 2 fps. At a speech boundary, up to twelve recent frames become an ordered WebM clip covering the last six seconds. LFM3 handles that clip with the spoken WAV input, returns text/tool calls, and generates speech through its local TTS endpoint. Playback streams back through Pipecat.
+Pipecat receives 16 kHz PCM audio and reduced JPEG frames at 2 fps. At a speech boundary, up to twelve recent frames become an ordered WebM clip covering the last six seconds. LFM3 transcribes the audio locally and analyzes the clip. The native session uses the transcript, audio and camera description to respond. Playback streams back through Pipecat.
 
-This is **not simultaneous full-duplex video/audio model decoding**. The agent does not continuously reason about every frame while speaking. The pinned runtime's realtime endpoint was not used because this experiment needs video input. [Implementation details](docs/live-experiment.md).
+A second inference slot on the same local model server analyzes the clip or attachment at the turn boundary. The realtime session receives the resulting description as text. Visual analysis can add several seconds before speech begins. [Implementation details](docs/live-experiment.md).
 
 ## Memory, actions and privacy
 
@@ -102,17 +107,17 @@ This is **not simultaneous full-duplex video/audio model decoding**. The agent d
 | --- | --- |
 | Notes | `data/notes/*.md`, with server-generated filenames |
 | Learned facts | `data/memory.json`, editable through corrections and **Forget** |
-| Conversation | Last two user turns in process memory, including interrupted turns |
+| Conversation | Native model session context, held for the duration of the call |
 | Audio/video | Bounded in-memory buffers; the app does not save recordings |
 | Internal service key and TLS files | Generated under `runtime/`, excluded from Git |
 
-“Learning” here means retaining useful facts and preferences. It does **not** train or update model weights. The model can misunderstand a request or choose the wrong tool arguments. Review saved activity. Completed writes are not rolled back by an interruption.
+For memory, say “Remember that…” or type “Remember: …”. The model suggests a label, and the server extracts the fact from your current typed request or speech transcript. Review the saved text for transcription errors. An interruption leaves completed writes in place.
 
 ## Current limits
 
-- One live call and one model request at a time.
+- One live call with two local inference slots for the realtime session and media processing.
 - Twenty seconds of audio per spoken turn, six seconds of camera history, and a 30-minute media session.
-- An 8,192-token configured context, bounded tool iterations and bounded uploads.
+- An 8,192-token context per slot, bounded tool iterations and bounded uploads.
 - Two tools: `save_note` and `remember_fact`. No shell, browser automation or arbitrary file access.
 - Notes and memories are shared within the instance. Browser sessions are not separate user accounts.
 - The Windows/CUDA launcher is the supported setup. Linux/macOS launchers, physical-phone live-call coverage, echo calibration and broad adversarial evaluation remain open work.
@@ -123,7 +128,7 @@ This is **not simultaneous full-duplex video/audio model decoding**. The agent d
 
 ```text
 src/
-  server/       Node HTTP/media gateway, agent loop and local storage
+  server/       Node HTTP/media gateway, tool validation and local storage
   media/        Python Pipecat pipeline, audio/video buffers and protocol
   web/          Browser interface and microphone/camera capture
 scripts/        Windows launchers, setup and verification tools
@@ -151,7 +156,7 @@ With the local services running:
 .\.venv\Scripts\python.exe scripts/live_smoke.py --lan
 ```
 
-The live test uses generated color frames and locally synthesized speech. It checks video order, streamed speech, interruption, stale-audio rejection and note title/body. It removes only its own synthetic notes. [Verification scope](docs/live-verification.md).
+The live test uses generated color frames and locally synthesized speech. It checks video order, streamed speech, interruption, stale-audio rejection and note title/body. It also verifies explicit memory writes and cleans up its synthetic notes and memory. [Verification scope](docs/live-verification.md).
 
 Before publishing your own fork or diagnostics, review staged files, run `npm run check:publication`, and scan for secrets. Do not publish real recordings, runtime keys, certificates, notes, memory or personal attachments. See [security and privacy](SECURITY.md) and [contributing](CONTRIBUTING.md).
 

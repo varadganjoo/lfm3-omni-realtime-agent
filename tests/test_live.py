@@ -72,7 +72,7 @@ class CancellationTests(unittest.IsolatedAsyncioTestCase):
         client = Mock()
         # Offline cancellation acknowledgement is allowed to fail without resuming old audio.
         client.post.side_effect = TimeoutError
-        processor = OmniProcessor("a" * 64, AsyncMock(side_effect=events.append), client)
+        processor = OmniProcessor("a" * 64, AsyncMock(side_effect=events.append), client, AsyncMock())
         processor.broadcast_frame = AsyncMock()
         ended = asyncio.Event()
 

@@ -77,7 +77,7 @@ export class LiveCall {
     try { message = JSON.parse(data); } catch { return; }
     if (message.type === 'flush') { this.blocked = true; this.clearPlayback(); }
     if (message.type === 'interrupted') this.minimumGeneration = Math.max(this.minimumGeneration, message.generation || 0);
-    if (message.type === 'answer') {
+    if (message.type === 'answer' || message.type === 'speech_start') {
       if (message.generation < this.minimumGeneration) return;
       this.lastGeneration = message.generation;
       this.blocked = false;

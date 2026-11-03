@@ -28,9 +28,9 @@ async def main():
             assert response.cookies['session']['secure']
         async with client.get(origin + '/', headers={'Host': 'untrusted.example'}) as response:
             assert response.status == 403
-        async with client.post(origin + '/api/cancel', json={}, headers={'Origin': 'https://example.com'}) as response:
+        async with client.post(origin + '/api/reset', json={}, headers={'Origin': 'https://example.com'}) as response:
             assert response.status == 403
-        async with client.post(origin + '/api/cancel', json={}, headers={'Origin': origin}) as response:
+        async with client.post(origin + '/api/reset', json={}, headers={'Origin': origin}) as response:
             assert response.status == 200
         async with client.ws_connect(origin.replace('https:', 'wss:') + '/api/live/media', origin=origin) as socket:
             for _ in range(20):

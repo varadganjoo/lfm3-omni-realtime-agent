@@ -10,7 +10,7 @@
   <main>
     <h1 class="sr-only">Live assistant session</h1>
     <section class="session-bar" aria-label="Live session controls">
-      <div class="session-state"><span class="state-indicator" aria-hidden="true"></span><div><h2 id="phase">Ready to connect</h2><p id="status" role="status">Start a call or send a message.</p></div></div>
+      <div class="session-state"><span class="state-indicator" aria-hidden="true"></span><div><h2 id="phase">Ready to connect</h2><p id="status" role="status">Start a call to speak or type.</p></div></div>
       <div class="input-meter"><label for="input-level">Mic activity</label><meter id="input-level" min="0" max="1" value="0">Microphone level</meter></div>
       <div class="session-actions"><label class="camera-option"><input id="use-camera" type="checkbox" checked> Use camera</label><button id="interrupt" class="secondary" disabled>Interrupt</button><button id="start-live" class="primary" disabled>Start live</button><button id="disconnect" class="stop" disabled>Stop agent</button></div>
     </section>
@@ -19,6 +19,7 @@
         <div class="section-heading"><h2 id="conversation-title">Conversation</h2><span id="latency">Voice and text</span></div>
         <div id="conversation" role="log" aria-live="polite"><div class="welcome"><h3>What would you like to do?</h3><p>Talk, share your camera, or ask me to save a note.</p></div></div>
         <form id="text-form"><label for="text">Message</label><div class="text-entry"><input id="text" maxlength="4000" placeholder="Ask a question or give an instruction" autocomplete="off"><button id="send" type="submit" aria-label="Send request" disabled>Send</button></div></form>
+        <label class="audio-row">Attach an image <input form="text-form" id="image-input" type="file" accept="image/jpeg,image/png,image/webp"></label>
       </section>
       <div class="side-panel">
       <section class="camera-panel" aria-labelledby="camera-title">

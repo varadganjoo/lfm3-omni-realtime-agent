@@ -29,6 +29,15 @@ test('interruption stops queued audio and late answers cannot restart playback',
   assert.equal(events.at(-1).text, 'New answer.');
 });
 
+test('native audio can start before its transcript and stale speech cannot resume playback', () => {
+  const call = new LiveCall({ onEvent() {} });
+  call.minimumGeneration = 2;
+  call.receive(JSON.stringify({ type: 'speech_start', generation: 1 }));
+  assert.equal(call.blocked, true);
+  call.receive(JSON.stringify({ type: 'speech_start', generation: 2 }));
+  assert.equal(call.blocked, false);
+});
+
 test('the actual microphone worklet emits clipped PCM16 in 20 ms packets', () => {
   const packets = [];
   let Capture;

@@ -14,6 +14,12 @@ from pipecat.frames.frames import (
 from pipecat.serializers.base_serializer import FrameSerializer
 
 
+def decode_jpeg(encoded):
+    if not isinstance(encoded, str) or len(encoded) > 160000:
+        raise ValueError("Invalid JPEG input")
+    return base64.b64decode(encoded, validate=True)
+
+
 class BrowserSerializer(FrameSerializer):
     def __init__(self):
         super().__init__()
@@ -44,10 +50,7 @@ class BrowserSerializer(FrameSerializer):
             now = time.monotonic()
             if now - self.last_image < 0.4:
                 return None
-            encoded = message.get("image")
-            if not isinstance(encoded, str) or len(encoded) > 160000:
-                raise ValueError("Invalid camera image")
-            raw = base64.b64decode(encoded, validate=True)
+            raw = decode_jpeg(message.get("image"))
             with Image.open(io.BytesIO(raw)) as image:
                 if image.format != "JPEG" or image.width > 640 or image.height > 480:
                     raise ValueError("Camera images must be JPEG, at most 640 by 480")
@@ -57,6 +60,11 @@ class BrowserSerializer(FrameSerializer):
             return result
         if kind == "ping":
             return None
+        if kind == "text" and "image" in message:
+            with Image.open(io.BytesIO(decode_jpeg(message["image"]))) as image:
+                if image.format != "JPEG" or image.width > 640 or image.height > 480:
+                    raise ValueError("Attachments must be JPEG, at most 640 by 480")
+                image.load()
         if kind in {"interrupt", "camera", "mute", "text"}:
             return InputTransportMessageFrame(message=message)
         raise ValueError("Unknown live command")

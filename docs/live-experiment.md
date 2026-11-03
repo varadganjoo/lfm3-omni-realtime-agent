@@ -18,16 +18,16 @@ Optional LAN listeners add HTTPS/WSS on port 8443 and public-certificate help on
 2. The Node upgrade handler validates Host, Origin and the browser's session. It inserts the internal key/session when proxying to Pipecat.
 3. Pipecat Silero detects speech onset and approximately 0.9 seconds of trailing silence. `TurnBuffer` retains audio preroll and at most twelve recent camera frames.
 4. At a turn boundary, PyAV encodes the ordered frames as a real VP8 WebM clip; audio becomes WAV. This is video input, not a single snapshot pretending to be video.
-5. Pipecat calls the Node agent. `runTurn` sends media and recent conversation through `/v1/chat/completions`, then handles at most four rounds of validated tools.
-6. The resulting text goes to the same local model's `/tts` endpoint. Float PCM is converted to PCM16 and streams through Pipecat to browser Web Audio playback at 24 kHz.
+5. The model transcribes the audio locally. With the camera enabled, a second inference slot analyzes the clip and supplies a text observation.
+6. The native realtime session receives speech and context, streams generated audio, and sends tool requests to the Node store. Memory writes require an explicit request in the current transcript or typed message.
 
-Typed requests use the same agent loop. Outside a live call, the browser receives a WAV reply with native audio controls.
+Typed requests use the same native session during a call.
 
 ## Interruption and stopping
 
 Speech onset cancels the prior inference/speech task and broadcasts a Pipecat interruption. The browser clears scheduled audio. Generation numbers keep a late answer from restarting interrupted playback.
 
-Stop agent also closes the media socket, releases all media tracks, pauses typed audio and requests server cancellation. A device-permission result arriving after disconnect is discarded. The recent user request stays in short-term context so a spoken continuation can finish an interrupted command.
+Stop agent also closes the media socket, releases all media tracks, and closes the native model session. A device-permission result arriving after disconnect is discarded. The recent user request stays in short-term context so a spoken continuation can finish an interrupted command.
 
 Completed note writes remain saved. Stopping a confirmation cannot roll back an action that already finished.
 
@@ -44,7 +44,7 @@ No weights are trained. The last two user turns live in memory; persistent facts
 
 ## Deliberate limits
 
-One live call, one model request, twenty seconds of audio per turn, six seconds of video context, 8,192 configured context tokens, bounded uploads/tools and a 30-minute media session. The model does not inspect the world continuously while speaking. Native simultaneous full-duplex audio/video decoding is not implemented.
+One live call, twenty seconds of audio per turn, six seconds of video context, 8,192 configured context tokens per inference slot, bounded uploads/tools and a 30-minute media session. Native voice uses the second slot for camera analysis at turn boundaries.
 
 The transport is Pipecat's FastAPI WebSocket transport. WebRTC is not part of the supported path; this avoids ICE/TURN configuration for the initial experiment.
 

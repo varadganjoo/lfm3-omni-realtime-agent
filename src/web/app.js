@@ -2,25 +2,25 @@ import { LiveCall } from './live.js';
 
 const $ = id => document.getElementById(id);
 const welcome = $('conversation').querySelector('.welcome').cloneNode(true);
-let ready = false, liveReady = false, live = false, connecting = false, busy = false, muted = false, cameraEnabled = true;
-let request, minimumGeneration = 0, stopping = false;
-const audioUrls = [];
+let ready = false, liveReady = false, live = false, connecting = false, muted = false, cameraEnabled = true;
+let minimumGeneration = 0, stopping = false;
 const phaseLabels = { offline: 'Ready to connect', connecting: 'Connecting', ready: 'Listening', listening: 'You are speaking', thinking: 'Working on your request', speaking: 'Speaking', reconnecting: 'Reconnecting' };
 
 function phase(state, detail) {
   document.body.dataset.state = state;
   $('phase').textContent = phaseLabels[state] || state;
-  $('status').textContent = detail || (state === 'ready' ? 'Speak to interrupt, or use the controls.' : state === 'offline' ? 'Start a call or send a message.' : '');
+  $('status').textContent = detail || (state === 'ready' ? 'Speak to interrupt, or use the controls.' : state === 'offline' ? 'Start a call to speak or type.' : '');
 }
 function controls() {
-  $('start-live').disabled = !ready || !liveReady || live || connecting || busy || stopping;
-  $('disconnect').disabled = stopping || (!live && !connecting && !busy && !document.querySelector('audio'));
-  $('interrupt').disabled = !live && !busy;
+  $('start-live').disabled = !ready || !liveReady || live || connecting || stopping;
+  $('disconnect').disabled = stopping || (!live && !connecting);
+  $('interrupt').disabled = !live;
   $('mute').disabled = !live;
   $('toggle-camera').disabled = !live || !call.stream?.getVideoTracks().length;
   $('use-camera').disabled = live || connecting;
-  $('new-chat').disabled = live || connecting || busy || stopping;
-  $('send').disabled = !ready || connecting || busy || stopping;
+  $('new-chat').disabled = live || connecting || stopping;
+  $('send').disabled = !ready || !live || connecting || stopping;
+  $('image-input').disabled = !live || stopping;
   $('mute').textContent = muted ? 'Unmute mic' : 'Mute mic';
   $('mute').setAttribute('aria-pressed', String(muted));
   $('toggle-camera').textContent = cameraEnabled ? 'Hide camera' : 'Show camera';
@@ -58,7 +58,7 @@ function liveEvent(event) {
     call.clearPlayback();
     message('Session', 'Reply interrupted. Any note already saved stays in your notes.', 'action');
     phase('ready');
-  } else if (event.type === 'user') message('You', event.text + (event.videoFrames ? ` with ${event.videoFrames} video frames` : ''));
+  } else if (event.type === 'user') message('You', event.text);
   else if (event.type === 'answer' && event.generation >= minimumGeneration) {
     message('Companion', event.text);
 
@@ -113,22 +113,20 @@ async function refresh() {
 }
 $('start-live').onclick = async () => {
   connecting = true; muted = false; cameraEnabled = $('use-camera').checked; minimumGeneration = 0;
-  phase('connecting', 'Allow microphone and camera access to start the local session.'); controls();
+  phase('connecting', cameraEnabled ? 'Allow microphone and camera access.' : 'Allow microphone access.'); controls();
   try { await call.connect(cameraEnabled); }
   catch (error) { phase('offline', 'Could not start live: ' + error.message); controls(); }
 };
 $('disconnect').onclick = async () => {
-  stopping = true; controls(); request?.abort();
-  document.querySelectorAll('audio').forEach(audio => audio.pause());
+  stopping = true; controls();
   try {
     await call.disconnect();
-    await api('cancel', {});
     phase('offline', 'Agent stopped. Microphone and camera are off.');
   } catch (error) { phase('offline', 'Devices stopped. Could not confirm server cancellation: ' + error.message); }
   finally { stopping = false; controls(); }
 };
 $('interrupt').onclick = async () => {
-  try { if (live) call.interrupt(); else { request?.abort(); await api('cancel', {}); } }
+  try { if (live) call.interrupt(); }
   catch (error) { $('status').textContent = error.message; }
 };
 $('mute').onclick = () => {
@@ -143,32 +141,42 @@ $('toggle-camera').onclick = () => {
   } catch (error) { $('status').textContent = error.message; }
 };
 $('text-form').onsubmit = async event => {
-  event.preventDefault(); const text = $('text').value.trim(); if (!text || busy) return;
-  $('text').value = '';
-  if (live) {
-    try { call.command({ type: 'text', text }); message('You', text); }
-    catch (error) { $('status').textContent = error.message; }
-    return;
-  }
-  busy = true; request = new AbortController(); controls(); message('You', text); phase('thinking');
+  event.preventDefault();
+  const text = $('text').value.trim();
+  const file = $('image-input').files[0];
+  if ((!text && !file) || !live) return;
+  const version = call.version;
   try {
-    const result = await api('turn', { text, speak: true }, request.signal);
-    result.events.forEach(showTool); const item = message('Companion', result.answer);
-    if (result.speech) {
-      const bytes = Uint8Array.from(atob(result.speech), c => c.charCodeAt(0));
-      const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' })); audioUrls.push(url);
-      const audio = document.createElement('audio'); audio.src = url; audio.controls = true; item.append(audio);
-      audio.play().catch(() => {});
+    const command = { type: 'text', text: text || 'Describe this image.' };
+    if (file) {
+      if (file.size > 20 * 1024 * 1024) throw new Error('Choose an image under 20 MB.');
+      const bitmap = await createImageBitmap(file);
+      try {
+        const scale = Math.min(1, 640 / bitmap.width, 480 / bitmap.height);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        command.image = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+        if (command.image.length > 160000) throw new Error('Choose a smaller image.');
+      } finally {
+        bitmap.close();
+      }
     }
-    if (result.speechError) message('Speech', result.speechError, 'error');
-  } catch (error) { message('Status', error.name === 'AbortError' ? 'Reply interrupted.' : error.message, 'error'); }
-  finally { busy = false; request = null; phase('offline'); await refresh(); }
+    if (version !== call.version) return;
+    call.command(command);
+    message('You', file ? command.text + '\nImage attached' : command.text);
+    $('text').value = '';
+    $('image-input').value = '';
+  } catch (error) {
+    $('status').textContent = error.message;
+  }
 };
 $('new-chat').onclick = async () => {
-  try { await api('reset', {}); $('conversation').replaceChildren(welcome.cloneNode(true)); audioUrls.splice(0).forEach(URL.revokeObjectURL); phase('offline', 'New chat. Notes and memories stay saved.'); controls(); }
+  try { await api('reset', {}); $('conversation').replaceChildren(welcome.cloneNode(true)); phase('offline', 'New chat. Notes and memories stay saved.'); controls(); }
   catch (error) { $('status').textContent = error.message; }
 };
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && live) { event.preventDefault(); try { call.interrupt(); } catch {} } });
-window.addEventListener('pagehide', () => { call.disconnect(); request?.abort(); audioUrls.forEach(URL.revokeObjectURL); });
+window.addEventListener('pagehide', () => { call.disconnect(); });
 $('volume').oninput = () => call.volume(Number($('volume').value));
 phase('offline'); refresh(); setInterval(refresh, 10000);

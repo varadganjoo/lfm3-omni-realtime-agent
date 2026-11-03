@@ -9,6 +9,7 @@ import time
 import wave
 import argparse
 import ssl
+from uuid import uuid4
 from pathlib import Path
 
 import aiohttp
@@ -30,6 +31,7 @@ async def main():
         context = ssl.create_default_context(cafile=str(ROOT / 'runtime' / 'tls' / 'companion-ca.pem'))
     events, audio_times, note_names = [], [], []
     pending = bytearray()
+    memory_key = "native_test_" + uuid4().hex[:12]
     color = "red"
     started = time.monotonic()
     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=context), cookie_jar=aiohttp.CookieJar(unsafe=True), headers={"Origin": origin}) as client:
@@ -82,7 +84,8 @@ async def main():
             senders = []
             try:
                 await wait(lambda: any(e.get("state") == "ready" for e in events))
-                senders = [asyncio.create_task(send_audio()), asyncio.create_task(send_video())]
+                senders = [asyncio.create_task(send_audio())]
+                senders.append(asyncio.create_task(send_video()))
                 await asyncio.sleep(2)
                 color = "blue"
                 await asyncio.sleep(2)
@@ -90,6 +93,10 @@ async def main():
                 await wait(lambda: any(e.get("type") == "answer" for e in events))
                 answer = next(e["text"] for e in events if e.get("type") == "answer")
                 assert "red" in answer.lower() and "blue" in answer.lower(), answer
+                await socket.send_json({"type": "text", "text": "Count aloud from one to thirty, using all the numbers."})
+                events.clear()
+                audio_times.clear()
+                await wait(lambda: any(e.get("type") == "speech_start" for e in events))
                 await wait(lambda: len(audio_times) > 5)
 
                 with wave.open(str(ROOT / "runtime" / "live-command.wav"), "rb") as wav:
@@ -99,20 +106,37 @@ async def main():
                 await wait(lambda: any(e.get("type") == "interrupted" for e in events), timeout=8)
                 interrupted_at = time.monotonic()
                 await wait(lambda: bool(note_names), timeout=40)
-                await wait(lambda: len([e for e in events if e.get("type") == "answer"]) >= 2)
+                await wait(lambda: any(e.get("type") == "answer" and e["at"] + started > interrupted_at for e in events))
+                await wait(lambda: len([e for e in events if e.get("type") == "speech_start"]) >= 2)
+                second_answer = [e for e in events if e.get("type") == "speech_start"][1]["at"] + started
                 assert any(e.get("type") == "user" and e.get("videoFrames", 0) >= 4 for e in events)
-                second_answer = [e for e in events if e.get("type") == "answer"][1]["at"] + started
                 assert not [t for t in audio_times if interrupted_at + 0.25 < t < second_answer], 'Old audio continued after interruption'
                 saved = next(e['event'] for e in events if e.get('type') == 'tool' and e.get('event', {}).get('saved'))
                 assert 'live test' in saved['title'].lower(), saved
                 note = (ROOT / 'data' / 'notes' / saved['filename']).read_text()
                 assert 'live video and voice worked' in note.lower(), note
-                print(json.dumps({"PASS": ["native video color order", "streamed speech", "spoken barge-in with no stale audio", "spoken note title and body"], "barge_in_detection_ms": round((interrupted_at - spoken_at) * 1000)}), flush=True)
+                await socket.send_json({"type": "text", "text": f'Remember that my test beverage is jasmine tea. Use the memory key {memory_key}.'})
+                await wait(lambda: any(e.get('event', {}).get('remembered') and e['event'].get('key') == memory_key for e in events))
+                async with client.get(origin + '/api/state') as response:
+                    state = await response.json()
+                    assert any(m['key'] == memory_key and 'jasmine' in m['value'].lower() for m in state['memories'])
+                await socket.close()
+                deadline = time.monotonic() + 8
+                while True:
+                    async with client.post(origin + '/api/reset', json={}) as response:
+                        if response.status == 200:
+                            break
+                        assert response.status == 409
+                    assert time.monotonic() < deadline, 'Native model ownership was not released after disconnect'
+                    await asyncio.sleep(0.1)
+                print(json.dumps({"PASS": ["native speech grounded in local video analysis", "streamed speech", "spoken barge-in with no stale audio", "spoken note title and body"], "barge_in_detection_ms": round((interrupted_at - spoken_at) * 1000)}), flush=True)
             finally:
                 receiver.cancel()
                 for task in senders:
                     task.cancel()
                 await asyncio.gather(receiver, *senders, return_exceptions=True)
+                async with client.post(origin + '/api/forget', json={'key': memory_key}) as response:
+                    assert response.status == 200, 'Could not clean up synthetic memory'
                 for name in note_names:
                     if len(name) == 39 and name.endswith(".md"):
                         with contextlib.suppress(FileNotFoundError):

@@ -36,6 +36,8 @@
 [hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
 button, input { font: inherit; }
+select { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; min-height: 38px; max-width: 180px; }
+.mode-option { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 button { min-height: 38px; padding: 8px 13px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background .15s, transform .1s; }
 button:hover:not(:disabled) { background: var(--inset); }
 button:active:not(:disabled) { transform: translateY(1px); }
@@ -146,6 +148,8 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 18px
   .session-actions { gap: 6px; flex-wrap: wrap; justify-content: flex-start; }
   .session-actions button { flex: 1; padding-inline: 10px; min-height: 40px; font-size: 12px; }
   .camera-option { width: 100%; margin: 0 0 2px; }
+  .mode-option { width: 100%; }
+  .mode-option select { max-width: none; flex: 1; }
   .workspace { grid-template-columns: minmax(0, 1fr); height: auto; }
   .conversation-panel { padding: 20px 18px; }
   #conversation { height: 300px; min-height: 240px; max-height: 400px; }

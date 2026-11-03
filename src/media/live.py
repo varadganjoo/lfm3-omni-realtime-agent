@@ -29,8 +29,9 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPIWebsocketTransport
 from pipecat.workers.runner import WorkerRunner
 
-from .live_media import TurnBuffer, encode_audio, encode_video, pcm16
+from .live_media import TurnBuffer, encode_audio, encode_video
 from .live_serializer import BrowserSerializer
+from .native import NativeSession
 
 ROOT = Path(__file__).resolve().parents[2]
 KEY = ""
@@ -41,11 +42,12 @@ logger.add(sys.stderr, level="INFO")
 
 
 class OmniProcessor(FrameProcessor):
-    def __init__(self, session, emit, client, **kwargs):
+    def __init__(self, session, emit, client, native, **kwargs):
         super().__init__(**kwargs)
         self.session = session
         self.emit = emit
         self.client = client
+        self.native = native
         self.buffer = TurnBuffer()
         self.response_task = None
         self.generation = 0
@@ -65,14 +67,7 @@ class OmniProcessor(FrameProcessor):
         await self.broadcast_frame(InterruptionFrame)
         if announce:
             await self.emit({"type": "interrupted", "generation": self.generation})
-        try:
-            async with self.client.post(ORIGIN + "/api/cancel", json={}, headers=self.headers(), timeout=aiohttp.ClientTimeout(total=3)) as response:
-                await response.read()
-        except (aiohttp.ClientError, TimeoutError):
-            logger.warning("Could not acknowledge agent cancellation; the closed request still aborts it.")
-
-    def headers(self):
-        return {"Origin": ORIGIN, "Cookie": "session=" + self.session, "X-Local-Engine-Key": KEY}
+        await self.native.cancel()
 
     async def cleanup(self):
         task, self.response_task = self.response_task, None
@@ -132,55 +127,61 @@ class OmniProcessor(FrameProcessor):
             await self.interrupt(announce=False)
         await self.push_frame(frame, direction)
 
-    async def start_response(self, *, audio=None, text=None):
+    async def start_response(self, *, audio=None, text=None, image=None):
         if self.response_task and not self.response_task.done():
             await self.interrupt()
         generation = self.generation
-        images = self.buffer.video_frames()
-        self.response_task = asyncio.create_task(self.respond(generation, audio, text, images))
+        images = [] if image else self.buffer.video_frames()
+        self.response_task = asyncio.create_task(self.respond(generation, audio, text, images, image))
 
-    async def respond(self, generation, audio, text, images):
+    async def transcribe(self, audio):
+        async with self.client.post(
+            "http://127.0.0.1:8081/v1/chat/completions",
+            headers={"Authorization": "Bearer " + KEY},
+            json={"model": "local-omni", "temperature": 0, "max_tokens": 256,
+                  "messages": [
+                      {"role": "system", "content": "Perform ASR in English."},
+                      {"role": "user", "content": [
+                          {"type": "input_audio", "input_audio": {"data": encode_audio(audio), "format": "wav"}}]}]},
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as response:
+            response.raise_for_status()
+            result = await response.json()
+            return (result["choices"][0]["message"]["content"] or "").strip()
+
+    async def respond(self, generation, audio, text, images, image=None):
         started = time.monotonic()
         await self.emit({"type": "state", "state": "thinking"})
         try:
-            video = await asyncio.to_thread(encode_video, images)
-            if generation != self.generation:
-                return
-            payload = {"speak": False, "video": video}
             if audio:
-                payload["audio"] = encode_audio(audio)
-                await self.emit({"type": "user", "text": "Voice turn", "videoFrames": len(images)})
-            else:
-                payload["text"] = text
-            async with self.client.post(ORIGIN + "/api/turn", json=payload, headers=self.headers(), timeout=aiohttp.ClientTimeout(total=180)) as response:
-                result = await response.json()
+                text = await self.transcribe(audio)
                 if generation != self.generation:
                     return
-                for event in result.get("events", []):
-                    await self.emit({"type": "tool", "event": event})
-                if response.status != 200:
-                    raise ValueError(result.get("error", "The local model could not answer."))
-            answer = result["answer"]
-            await self.emit({"type": "answer", "text": answer, "generation": generation})
-            await self.push_frame(TTSStartedFrame())
-            async with self.client.post("http://127.0.0.1:8081/tts", json={"input": answer, "lang": "en", "voice": "female", "n_predict": 512, "response_format": "pcm", "stream": True}, headers={"Authorization": "Bearer " + KEY}, timeout=aiohttp.ClientTimeout(total=90)) as response:
-                if response.status != 200:
-                    raise ValueError("Speech generation failed. Your text reply is still available.")
-                pending = bytearray()
-                first = True
-                async for chunk in response.content.iter_chunked(3840):
-                    if generation != self.generation:
-                        return
-                    pending.extend(chunk)
-                    count = len(pending) // 4 * 4
-                    if not count:
-                        continue
-                    audio_chunk = pcm16(bytes(pending[:count]))
-                    del pending[:count]
-                    if first:
-                        first = False
-                        await self.emit({"type": "latency", "ms": round((time.monotonic() - started) * 1000)})
-                    await self.push_frame(TTSAudioRawFrame(audio=audio_chunk, sample_rate=24000, num_channels=1))
+                if not text:
+                    await self.emit({"type": "error", "message": "I couldn't transcribe that. Please try again."})
+                    await self.emit({"type": "state", "state": "ready"})
+                    return
+                await self.emit({"type": "user", "text": text, "videoFrames": len(images)})
+
+            first = True
+
+            async def native_event(event):
+                if generation == self.generation:
+                    await self.emit({**event, "generation": generation})
+
+            async def native_audio(pcm):
+                nonlocal first
+                if generation != self.generation:
+                    return
+                if first:
+                    first = False
+                    await self.emit({"type": "speech_start", "generation": generation})
+                    await self.emit({"type": "latency", "ms": round((time.monotonic() - started) * 1000)})
+                    await self.push_frame(TTSStartedFrame())
+                await self.push_frame(TTSAudioRawFrame(audio=pcm, sample_rate=24000, num_channels=1))
+
+            video = await asyncio.to_thread(encode_video, images)
+            await self.native.respond(audio, text, native_event, native_audio, video=video, image=image)
             await self.push_frame(TTSStoppedFrame())
         except asyncio.CancelledError:
             raise
@@ -190,6 +191,7 @@ class OmniProcessor(FrameProcessor):
                 await self.emit({"type": "error", "message": str(error) if isinstance(error, ValueError) else "The local response failed. Check the live service log."})
                 await self.push_frame(TTSStoppedFrame())
                 await self.emit({"type": "state", "state": "ready"})
+                await self.push_frame(EndFrame())
 
     async def command(self, message):
         if not isinstance(message, dict):
@@ -207,45 +209,54 @@ class OmniProcessor(FrameProcessor):
             await self.interrupt(announce=False)
         elif kind == "text" and isinstance(message.get("text"), str) and 0 < len(message["text"].strip()) <= 4000:
             await self.interrupt(announce=False)
-            await self.start_response(text=message["text"].strip())
+            await self.start_response(text=message["text"].strip(), image=message.get("image"))
 
 
 async def run_bot(websocket, session):
     async with aiohttp.ClientSession() as client:
-        transport = FastAPIWebsocketTransport(websocket, params=FastAPIWebsocketParams(
-            audio_in_enabled=True, audio_out_enabled=True,
-            audio_in_sample_rate=16000, audio_out_sample_rate=24000,
-            audio_out_10ms_chunks=2, add_wav_header=False,
-            serializer=BrowserSerializer(), allowed_origins=[ORIGIN],
-            session_timeout=1800,
-        ))
+        native = NativeSession(client, KEY, {"Origin": ORIGIN, "Cookie": "session=" + session, "X-Local-Engine-Key": KEY})
+        try:
+            await native.open()
+            await run_pipeline(websocket, session, client, native)
+        finally:
+            await native.close()
 
-        async def emit(message):
-            await transport.output().send_message(OutputTransportMessageUrgentFrame(message=message))
 
-        omni = OmniProcessor(session, emit, client)
-        vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(
-            start_secs=0.15, stop_secs=0.9, confidence=0.7, min_volume=0.5)))
-        worker = PipelineWorker(
-            Pipeline([transport.input(), vad, omni, transport.output()]),
-            params=PipelineParams(audio_in_sample_rate=16000, audio_out_sample_rate=24000),
-            idle_timeout_secs=None, enable_rtvi=False)
-        runner = WorkerRunner(handle_sigint=False)
-        await runner.add_workers(worker)
+async def run_pipeline(websocket, session, client, native):
+    transport = FastAPIWebsocketTransport(websocket, params=FastAPIWebsocketParams(
+        audio_in_enabled=True, audio_out_enabled=True,
+        audio_in_sample_rate=16000, audio_out_sample_rate=24000,
+        audio_out_10ms_chunks=2, add_wav_header=False,
+        serializer=BrowserSerializer(), allowed_origins=[ORIGIN],
+        session_timeout=1800,
+    ))
 
-        @worker.event_handler("on_pipeline_started")
-        async def ready(_worker, _frame):
-            await emit({"type": "state", "state": "ready"})
+    async def emit(message):
+        await transport.output().send_message(OutputTransportMessageUrgentFrame(message=message))
 
-        @transport.event_handler("on_client_disconnected")
-        async def disconnected(_transport, _client):
-            await worker.cancel()
+    omni = OmniProcessor(session, emit, client, native=native)
+    vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(
+        start_secs=0.15, stop_secs=0.9, confidence=0.7, min_volume=0.5)))
+    worker = PipelineWorker(
+        Pipeline([transport.input(), vad, omni, transport.output()]),
+        params=PipelineParams(audio_in_sample_rate=16000, audio_out_sample_rate=24000),
+        idle_timeout_secs=None, enable_rtvi=False)
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
 
-        @transport.event_handler("on_session_timeout")
-        async def timeout(_transport, _client):
-            await worker.cancel()
+    @worker.event_handler("on_pipeline_started")
+    async def ready(_worker, _frame):
+        await emit({"type": "state", "state": "ready"})
 
-        await runner.run()
+    @transport.event_handler("on_client_disconnected")
+    async def disconnected(_transport, _client):
+        await worker.cancel()
+
+    @transport.event_handler("on_session_timeout")
+    async def timeout(_transport, _client):
+        await worker.cancel()
+
+    await runner.run()
 
 
 @asynccontextmanager
@@ -285,6 +296,8 @@ async def media(websocket: WebSocket):
         await run_bot(websocket, session)
     except Exception as error:
         logger.error("Live pipeline failed: {}", type(error).__name__)
+        with contextlib.suppress(Exception):
+            await websocket.send_json({"type": "error", "message": str(error) if isinstance(error, ValueError) else "The local media connection failed. Restart the call."})
     finally:
         calls.pop(session, None)
         with contextlib.suppress(Exception):

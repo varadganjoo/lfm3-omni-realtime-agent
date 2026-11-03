@@ -15,7 +15,7 @@ Coverage includes note path confinement, memory persistence/correction, tool arg
 
 Offline unit tests do not need model downloads, a GPU, a microphone or private runtime files. The repository workflow runs this subset on a clean checkout.
 
-The publication candidate includes 16 JavaScript tests and 7 Python tests. The exported clean snapshot is tested without private runtime files. A running-service test using the generated speech fixture passed video color order, streamed speech, spoken interruption, stale-audio rejection and the requested note title/body. These are reference test results, not a guarantee of model accuracy on new requests.
+The local suite includes 15 JavaScript tests and 14 Python tests. The original publication snapshot was also tested without private runtime files. Running-service tests use generated speech/video fixtures to check streamed speech, spoken interruption, stale-audio rejection and real tool writes. The native voice test also checks memory persistence and model-slot release. These are reference test results, not a guarantee of model accuracy on new requests.
 
 ## Running-service checks
 
