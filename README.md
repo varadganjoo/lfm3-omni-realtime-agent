@@ -4,7 +4,7 @@
 
 # Local Omni Agent
 
-An experimental voice-and-vision agent built with **LFM3-Omni-2B, llama.cpp and Pipecat**. One native realtime session handles voice and typed requests, streams spoken replies, and uses visual context from webcam clips or image attachments. Inference runs locally.
+An experimental voice-and-vision agent built with **LFM3-Omni-2B, llama.cpp and Pipecat**. A native realtime session in llama.cpp handles voice and typed requests and streams spoken replies directly from the model. A second inference slot on the same local model server analyzes recent webcam clips or attached images and sends a text description to the realtime session. All inference runs locally.
 
 This repository demonstrates a small working agent mechanism, not a production assistant or a benchmark. The supported launcher targets **Windows with an NVIDIA GPU**. Model weights and native binaries are downloaded separately and are not included here.
 
